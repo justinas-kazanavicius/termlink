@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Rewrite file paths in piped output as OSC 8 hyperlinks.
+
+Ghostty's cmd+click then opens the file in an editor at the right line.
+Relative paths resolve against $PWD; paths that do not exist are left alone.
+Set TERMLINK_SCHEME to vscode (default), cursor, vscode-insiders or file.
+"""
+
+import os
+import re
+import sys
+from urllib.parse import quote
+
+SCHEME = os.environ.get("TERMLINK_SCHEME", "vscode")
+BASE = os.environ.get("PWD", os.getcwd())
+HOME = os.path.expanduser("~")
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b.")
+PATH = re.compile(
+    r"(?<![\w/.~-])"
+    r"((?:~/|\.{1,2}/|/)?(?:[\w.@+-]+/)*[\w.@+-]*[\w@+-]\.[A-Za-z][A-Za-z0-9]{0,9})"
+    r"(?::(\d+))?(?::(\d+))?"
+)
+
+_cache: dict[str, str | None] = {}
+
+
+def resolve(path: str) -> str | None:
+    """Return the absolute path if it exists on disk, else None."""
+    if path not in _cache:
+        full = os.path.join(HOME, path[2:]) if path.startswith("~/") else path
+        if not full.startswith("/"):
+            full = os.path.join(BASE, full)
+        full = os.path.normpath(full)
+        _cache[path] = full if os.path.isfile(full) else None
+    return _cache[path]
+
+
+def uri(full: str, line: str | None, col: str | None) -> str:
+    """Build the editor URI for an absolute path and optional line/column."""
+    encoded = quote(full)
+    if SCHEME == "file":
+        return f"file://{encoded}"
+    target = f"{SCHEME}://file{encoded}"
+    if line:
+        target += f":{line}" + (f":{col}" if col else "")
+    return target
+
+
+def split_ansi(line: str) -> tuple[str, list[int]]:
+    """Return the line with escape sequences removed, plus each kept char's index."""
+    plain, index, pos = [], [], 0
+    for match in ANSI.finditer(line):
+        for i in range(pos, match.start()):
+            plain.append(line[i])
+            index.append(i)
+        pos = match.end()
+    for i in range(pos, len(line)):
+        plain.append(line[i])
+        index.append(i)
+    return "".join(plain), index
+
+
+def rewrite(line: str) -> str:
+    """Wrap every existing file path in the line with an OSC 8 hyperlink."""
+    plain, index = split_ansi(line)
+    inserts: list[tuple[int, str]] = []
+    for match in PATH.finditer(plain):
+        full = resolve(match.group(1))
+        if not full:
+            continue
+        start, end = index[match.start()], index[match.end() - 1] + 1
+        inserts.append((start, f"\x1b]8;;{uri(full, match.group(2), match.group(3))}\x1b\\"))
+        inserts.append((end, "\x1b]8;;\x1b\\"))
+    if not inserts:
+        return line
+    out, prev = [], 0
+    for pos, text in inserts:
+        out.append(line[prev:pos])
+        out.append(text)
+        prev = pos
+    out.append(line[prev:])
+    return "".join(out)
+
+
+def main() -> None:
+    """Stream stdin to stdout, hyperlinking file paths line by line."""
+    for line in sys.stdin:
+        line = line.replace("\x04", "").replace("^D\x08\x08", "")  # pty EOF echo from `script`
+        sys.stdout.write(line if "\x1b]8;;" in line else rewrite(line))
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

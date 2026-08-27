@@ -1,0 +1,13 @@
+#!/bin/zsh
+# Cmd+click each line below and note which ones open a file.
+# Run from the termlink repo root (uses README.md as the test target).
+rel="README.md"
+abs="$PWD/$rel"
+[[ -f $rel ]] || { print "run me from a directory containing README.md"; exit 1 }
+print -r -- "cwd: $PWD"
+print -r -- "1. bare relative       : $rel"
+print -r -- "2. bare absolute       : $abs"
+print -r -- "3. relative with line  : $rel:7"
+printf '4. OSC 8 -> vscode     : \033]8;;vscode://file%s:7:1\033\\%s:7\033]8;;\033\\\n' "$abs" "$rel"
+printf '5. OSC 8 -> file://    : \033]8;;file://%s\033\\%s\033]8;;\033\\\n' "$abs" "$rel"
+print -r -- "6. via termlink        : $(print -r -- "$rel:7" | ./termlink)"
