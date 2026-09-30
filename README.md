@@ -81,11 +81,28 @@ Run `./termlink-test` from the repo root and cmd+click each printed line.
 Lines 1, 2, 4, 5 and 6 should open a file; line 3 (bare `path:line`) should
 do nothing, which is exactly the gap `termlink` fills.
 
+## Inside Claude Code
+
+Claude Code's fullscreen UI (`"tui": "fullscreen"`) turns on mouse
+reporting. While an app has the mouse, Ghostty only looks for links when
+shift is held, so use **cmd+shift+click** there. Plain cmd+click never
+reaches the link. To get plain cmd+click back, `export
+CLAUDE_CODE_DISABLE_MOUSE=1`, at the cost of mouse scrolling in Claude Code.
+
+Claude also has to print paths Ghostty can open. By default it writes
+`path:42`, which fails. `claude/file-links.md` is a rule that makes it write
+`dir/file.py` (line 42) instead. Install it with:
+
+```sh
+mkdir -p ~/.claude/rules
+cp claude/file-links.md ~/.claude/rules/
+```
+
+Rules load when a session starts.
+
 ## Caveats
 
-- Inside full-screen TUIs that capture the mouse (Claude Code included),
-  Ghostty never sees the hover, so only links the app itself emits as OSC 8
-  survive. `termlink` is for your normal shell.
+- `termlink` is for your normal shell. It can't rewrite a TUI's output.
 - Some Ghostty builds have an OSC 8 dispatch bug
   ([ghostty#11907](https://github.com/ghostty-org/ghostty/issues/11907))
   where the link renders but the click does nothing; update Ghostty if
