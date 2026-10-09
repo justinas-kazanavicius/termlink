@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { fromHref, linkify, resolvePath, toHref } from '../hooks/linkify'
+import { editorUrl } from '../hooks/editor'
 import { pathsOfToolUse, projectRoot, Roots } from '../hooks/roots'
 
 const CWD = '/repo'
@@ -129,6 +130,11 @@ describe('roots', () => {
     roots.use('/repo')
     expect(roots.bases('/repo')).toEqual(['/repo', '/a', '/b'])
   })
+})
+
+test('the file scheme opens with no line', async () => {
+  expect(editorUrl('file', { path: '/a b.py', line: 3 })).toBe('file:///a%20b.py')
+  expect(editorUrl('cursor', { path: '/a b.py', line: 3, column: 2 })).toBe('cursor://file/a%20b.py:3:2')
 })
 
 const stubHost = (on: On, opened: string[][]) => {

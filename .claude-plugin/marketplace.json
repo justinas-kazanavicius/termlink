@@ -1,0 +1,11 @@
+{
+  "name": "termlink",
+  "owner": { "name": "Justinas Kazanavicius" },
+  "plugins": [
+    {
+      "name": "termlink",
+      "source": "./claude-mod",
+      "description": "Turns file paths in Claude's replies into links that open in your editor"
+    }
+  ]
+}

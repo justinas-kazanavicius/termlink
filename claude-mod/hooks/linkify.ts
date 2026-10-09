@@ -162,7 +162,19 @@ export async function linkify(
   return { text: out.join('\n'), hrefs }
 }
 
-async function findFile(
+/**
+ * Finds the file a path names: as written when anchored, else under each base.
+ *
+ * Args:
+ *   path: the path as written.
+ *   bases: the folders a relative path is tried against, in order.
+ *   home: the user's home directory.
+ *   isFile: whether an absolute path is a file.
+ *
+ * Returns:
+ *   The absolute path of the first file found, or undefined.
+ */
+export async function findFile(
   path: string,
   bases: readonly string[],
   home: string,

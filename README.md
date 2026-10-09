@@ -89,16 +89,29 @@ a link.
 
 ### Install
 
-Clone this repo, then load the mod in every session by adding its folder to
-`~/.claude/settings.json` (merge into an existing `env` block):
+On any machine, at the Claude Code prompt:
+
+```
+/plugin install termlink --marketplace justinas-kazanavicius/termlink
+```
+
+Answer `y` to add the marketplace, then pick the user scope.
+
+To run it from a clone instead, so edits load as you save them, add its
+folder to `~/.claude/settings.json` (merge into an existing `env` block):
 
 ```json
 { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/termlink/claude-mod" } }
 ```
 
-Adjust the path to where you cloned it. New sessions load it; a running one
-reloads it whenever a file in the folder changes. `TERMLINK_SCHEME` from
-Step 3 picks the editor, as for `termlink`.
+`TERMLINK_SCHEME` from Step 3 picks the editor, as for `termlink`. Then
+install `claude/file-links-mod.md` as a rule, so Claude writes paths outside
+the working directory in full:
+
+```sh
+mkdir -p ~/.claude/rules
+cp claude/file-links-mod.md ~/.claude/rules/file-links.md
+```
 
 ### Clicking
 
@@ -117,7 +130,8 @@ Ghostty only sees links with shift held.
 Any path that exists on disk: `foo.py`, `foo.py:42`, `foo.py:42:7`,
 `` `foo.py` `` (line 42), `./x`, `../x`, `/abs/x`, `~/x`, hidden files and
 folders. Code blocks, commands in backticks, URLs and existing links are left
-alone.
+alone. Tool output (Bash, Grep) is not linked: Claude Code draws it itself and
+refuses the escape codes a link needs.
 
 A relative path is tried against the working directory first, then against
 the projects Claude has read, edited, searched or `cd`ed into this session
