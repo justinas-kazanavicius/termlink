@@ -109,7 +109,7 @@ It rewrites each reply as it is drawn: every path that exists on disk
 existing links are left alone. A relative path is tried against the
 working directory first, then against the projects Claude has read, edited,
 searched or `cd`ed into this session (the nearest folder holding `.git`),
-the most recently used first.
+the most recently used first. `/termlink-roots` lists them in the order they are tried.
 
 - **cmd+shift+click** opens the file through Ghostty and the duti defaults,
   at the top (a `file://` URL carries no line VS Code reads).

@@ -35,17 +35,41 @@ async function openAtLine($: EngineInterface, href: string): Promise<void> {
  */
 async function noteRoots($: EngineInterface, roots: Roots, tool: string, input: Record<string, unknown>): Promise<void> {
   const home = (await $.env.get('HOME')) ?? ''
-  const kindOf = async (path: string) => (await $.fs.stat(path).catch(() => undefined))?.kind
   for (const path of pathsOfToolUse(tool, input, home)) {
-    const root = await projectRoot(path, home, kindOf)
+    if (!rootOf.has(path)) rootOf.set(path, await projectRoot(path, home, kindOf($)))
+    const root = rootOf.get(path)
     if (root !== undefined) roots.use(root)
   }
 }
 
+// Each path's project, looked up once: the history names the same files many times.
+const rootOf = new Map<string, string | undefined>()
+
+const kindOf = ($: EngineInterface) => async (path: string) => (await $.fs.stat(path).catch(() => undefined))?.kind
+
 export const register: Register = on => {
   const roots = new Roots()
-  // The history is read once per load, so a reload or a resumed session starts with its roots.
-  let hasReadHistory = false
+
+  // The history is read on each load, so a reload or a resumed session starts with its roots.
+  // It runs past the hook, so a long session never holds up its start.
+  on('session.start', async ($, e, next) => {
+    await $.command.register({
+      name: 'termlink-roots',
+      description: 'List the folders termlink resolves relative paths against',
+    })
+    void (async () => {
+      for (const message of await $.session.messages()) {
+        for (const use of message.toolUses) await noteRoots($, roots, use.tool, use.input)
+      }
+      $.ui.invalidate('ui.render')
+    })()
+    return next(e)
+  })
+
+  on('command.run', { command: 'termlink-roots' }, async $ => {
+    const bases = roots.bases(await $.session.cwd())
+    return { text: bases.map((base, at) => `${at + 1}. ${base}`).join('\n') }
+  })
 
   // A hit is kept; a miss is asked again after a while, since a turn may create the file.
   const files = new Set<string>()
@@ -67,12 +91,6 @@ export const register: Register = on => {
       files.add(path)
       misses.delete(path)
       return true
-    }
-    if (!hasReadHistory) {
-      hasReadHistory = true
-      for (const message of await $.session.messages()) {
-        for (const use of message.toolUses) await noteRoots($, roots, use.tool, use.input)
-      }
     }
     const cwd = await $.session.cwd()
     const home = (await $.env.get('HOME')) ?? ''
