@@ -137,7 +137,7 @@ test('the file scheme opens with no line', async () => {
   expect(editorUrl('cursor', { path: '/a b.py', line: 3, column: 2 })).toBe('cursor://file/a%20b.py:3:2')
 })
 
-const stubHost = (on: On, opened: string[][]) => {
+const stubHost = (on: On, opened: string[][], isOpenMissing = false) => {
   on('session.cwd', () => ({ value: CWD }))
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : e.name === 'TERMLINK_SCHEME' ? 'vscode' : undefined }))
   on('session.messages', () => ({ value: [] }))
@@ -147,6 +147,7 @@ const stubHost = (on: On, opened: string[][]) => {
     return { value: { kind: 'file', size: 1, mtimeMs: 0, isLink: false } }
   })
   on('process.run', ($, e) => {
+    if (isOpenMissing && e.argv[0] === 'open') return { deny: 'not found' }
     opened.push([...e.argv])
     return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -191,4 +192,23 @@ test('a relative path resolves in a project a tool call worked in', async ($, on
   const markdown = await ui.find({ type: 'Markdown' })
   expect(markdown?.props.text).toBe('see [claude-mod/tsconfig.json](file:///home/me/other/claude-mod/tsconfig.json)')
   await ui.unmount()
+})
+
+test('a click falls back to xdg-open where open cannot start', async ($, on) => {
+  const opened: string[][] = []
+  stubHost(on, opened, true)
+  const ui = await $.ui.mount({ plugin: 'termlink', surface: 'terminal', component: 'AssistantMessage', props: PROPS })
+  const markdown = await ui.find({ type: 'Markdown' })
+  await ui.press({ key: markdown!.key!, link: { href: 'file:///repo/libs/a.py#L42' } })
+  expect(opened).toEqual([['xdg-open', 'vscode://file/repo/libs/a.py:42']])
+  await ui.unmount()
+})
+
+test('the system prompt gets the file-links section on the terminal only', async ($, on) => {
+  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'hi', scope: 'shared' }] }))
+  const base = { model: 'm', promptModel: 'm', tools: [], outputStyle: null, traits: [] }
+  const terminal = await $.prompt.compose({ ...base, surfaces: ['terminal'] })
+  expect(terminal.sections.map(section => section.id)).toEqual(['intro', 'termlink:file-links'])
+  const headless = await $.prompt.compose({ ...base, surfaces: [] })
+  expect(headless.sections.map(section => section.id)).toEqual(['intro'])
 })

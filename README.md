@@ -1,11 +1,103 @@
 # termlink
 
-Cmd+click file paths in [Ghostty](https://ghostty.org) (macOS) and have them
-open in VS Code, at the right line when the tool printed one (`foo.py:88`
-style).
+Click a file path in your terminal and it opens in your editor, at the line
+when one is printed (`foo.py:88`). Two independent parts:
 
-Ghostty needs no config for this. It already cmd+clicks bare paths and URLs
-out of the box. Two problems remain, and this repo fixes both:
+- **A Claude Code mod** that links the file paths in Claude's replies. One
+  line to install, nothing else to set up.
+- **A shell setup** for everything else you run: a filter that turns paths in
+  any command's output into links, and the file associations that make
+  cmd+click open your editor. Written for [Ghostty](https://ghostty.org) on
+  macOS.
+
+## Claude Code mod
+
+At the Claude Code prompt:
+
+```
+/plugin install termlink --marketplace justinas-kazanavicius/termlink
+```
+
+Answer `y` to add the marketplace, then pick the user scope. It is active at
+once.
+
+Every path in Claude's replies that exists on disk becomes a link:
+
+- **Plain click** opens the file in your editor at the line. It lands after
+  a short pause, while Claude Code rules out a double-click.
+- **cmd+shift+click** (Ghostty, iTerm2 and other terminals with OSC 8 links)
+  opens the file with your system's default app, at the top: a link inside a
+  reply can only be a `file://` URL, which carries no line.
+
+The mod also tells Claude how to write paths so they link: as they are on
+disk, absolute for files outside the working directory.
+
+### Requirements
+
+- Claude Code with mod support (tested on 2.1.295; the mod API is early
+  access and may change).
+- The fullscreen UI (`"tui": "fullscreen"` in settings) for plain click.
+- VS Code by default. Set `TERMLINK_SCHEME` to `cursor`, `vscode-insiders`
+  or `file` (your default app, no line) before starting Claude Code.
+- macOS opens links with `open`, Linux with `xdg-open`.
+
+### What the install covers
+
+| Piece | Installed by `/plugin install`? |
+|---|---|
+| Links in Claude's replies, plain click at the line | Yes |
+| Instructions to Claude on writing paths | Yes |
+| `/termlink-roots` | Yes |
+| Editor choice (`TERMLINK_SCHEME`) | No; VS Code unless set |
+| Default apps for cmd+shift+click (Step 1 below) | No |
+| Links in your own shell's output (Steps 2 and 3) | No |
+
+### What gets linked
+
+Any path that exists on disk: `foo.py`, `foo.py:42`, `foo.py:42:7`,
+`` `foo.py` `` (line 42), `./x`, `../x`, `/abs/x`, `~/x`, hidden files and
+folders. Code blocks, commands in backticks, URLs and existing links are left
+alone. Tool output (Bash, Grep) is not linked: Claude Code draws it itself and
+refuses the escape codes a link needs.
+
+A relative path is tried against the working directory first, then against
+the projects Claude has read, edited, searched or `cd`ed into this session
+(the nearest folder holding `.git`), most recently used first. Run
+`/termlink-roots` to list them in the order they are tried.
+
+### Developing it
+
+To run the mod from a clone, so edits load as you save them, add its folder
+to `~/.claude/settings.json` (merge into an existing `env` block):
+
+```json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/termlink/claude-mod" } }
+```
+
+`claude plugin test claude-mod` runs its tests and `claude plugin validate
+claude-mod` checks what it hooks. Run with `claude --debug` to see a hook that
+was skipped and why. Bump `version` in `claude-mod/.claude-plugin/plugin.json`
+with each change, or installed copies will not update.
+
+### Without the mod
+
+`claude/file-links.md` is a rule that makes Claude write paths Ghostty can
+cmd+shift+click on its own: `dir/file.py` (line 42) rather than `path:42`,
+which Ghostty does not match.
+
+```sh
+mkdir -p ~/.claude/rules
+cp claude/file-links.md ~/.claude/rules/
+```
+
+To get plain cmd+click back instead of cmd+shift+click, `export
+CLAUDE_CODE_DISABLE_MOUSE=1`, at the cost of mouse scrolling in Claude Code
+(and the mod's plain click).
+
+## Shell setup (Ghostty, macOS)
+
+Ghostty already cmd+clicks bare paths and URLs out of the box. Two problems
+remain:
 
 1. Ghostty opens paths via the macOS "default app", so `.py` opens IDLE,
    `.json` opens Xcode, and so on, until you fix the file associations.
@@ -15,7 +107,7 @@ out of the box. Two problems remain, and this repo fixes both:
    text is a link") carrying a `vscode://file/<abs-path>:line:col` URL, which
    VS Code opens at the exact line.
 
-## Step 1: point code file types at VS Code
+### Step 1: point code file types at VS Code
 
 ```sh
 brew install duti
@@ -30,7 +122,7 @@ video files open in VS Code too after this.
 
 This alone makes cmd+click on bare paths work.
 
-## Step 2: install the `termlink` script
+### Step 2: install the `termlink` script
 
 ```sh
 mkdir -p ~/.local/bin
@@ -42,7 +134,7 @@ It reads piped output, finds file paths that actually exist on disk
 (relative ones resolve against the current directory), and wraps them in
 OSC 8 links, preserving colours. Paths that do not exist are left alone.
 
-## Step 3: shell wiring
+### Step 3: shell wiring
 
 Add to `~/.zshrc` (make sure `~/.local/bin` is on your PATH):
 
@@ -68,96 +160,18 @@ line-accurate links with no wrapper needed. For everything else, either pipe
 (`pytest -q | tl`) or wrap (`tl pytest -q`, which keeps colours because it
 runs under a pseudo-terminal).
 
-## Usage
+### Usage
 
 - Plain cmd+click on any bare path: opens in VS Code (via the duti defaults).
 - `rg something`: results are clickable at the exact line and column.
 - `tl <command>` or `<command> | tl`: any tool's paths become clickable,
   with line numbers when printed as `path:line` or `path:line:col`.
 
-## Verifying
+### Verifying
 
 Run `./termlink-test` from the repo root and cmd+click each printed line.
 Lines 1, 2, 4, 5 and 6 should open a file; line 3 (bare `path:line`) should
 do nothing, which is exactly the gap `termlink` fills.
-
-## Inside Claude Code
-
-`termlink` can't rewrite Claude Code's output, so `claude-mod/` does its job
-there: a Claude Code mod that turns every file path in Claude's replies into
-a link.
-
-### Install
-
-On any machine, at the Claude Code prompt:
-
-```
-/plugin install termlink --marketplace justinas-kazanavicius/termlink
-```
-
-Answer `y` to add the marketplace, then pick the user scope.
-
-To run it from a clone instead, so edits load as you save them, add its
-folder to `~/.claude/settings.json` (merge into an existing `env` block):
-
-```json
-{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/termlink/claude-mod" } }
-```
-
-`TERMLINK_SCHEME` from Step 3 picks the editor, as for `termlink`. Then
-install `claude/file-links-mod.md` as a rule, so Claude writes paths outside
-the working directory in full:
-
-```sh
-mkdir -p ~/.claude/rules
-cp claude/file-links-mod.md ~/.claude/rules/file-links.md
-```
-
-### Clicking
-
-Claude Code's fullscreen UI (`"tui": "fullscreen"`) holds the mouse, so
-Ghostty only sees links with shift held.
-
-- **Plain click** opens the file at the line, via
-  `open $TERMLINK_SCHEME://file/abs/foo.py:42`. It lands after a short pause:
-  Claude Code waits to rule out a double-click first.
-- **cmd+shift+click** opens it through Ghostty and the duti defaults, at the
-  top. Links inside a reply may only be `file:`, `http:` or `https:`, and a
-  `file://` URL carries no line VS Code reads.
-
-### What gets linked
-
-Any path that exists on disk: `foo.py`, `foo.py:42`, `foo.py:42:7`,
-`` `foo.py` `` (line 42), `./x`, `../x`, `/abs/x`, `~/x`, hidden files and
-folders. Code blocks, commands in backticks, URLs and existing links are left
-alone. Tool output (Bash, Grep) is not linked: Claude Code draws it itself and
-refuses the escape codes a link needs.
-
-A relative path is tried against the working directory first, then against
-the projects Claude has read, edited, searched or `cd`ed into this session
-(the nearest folder holding `.git`), most recently used first. Run
-`/termlink-roots` to list them in the order they are tried.
-
-### Developing it
-
-`claude plugin test claude-mod` runs its tests and `claude plugin validate
-claude-mod` checks what it hooks. Run with `claude --debug` to see a hook that
-was skipped and why.
-
-### Without the mod
-
-`claude/file-links.md` is a rule that makes Claude write paths Ghostty can
-cmd+shift+click on its own: `dir/file.py` (line 42) rather than `path:42`,
-which Ghostty does not match. The mod makes it unnecessary.
-
-```sh
-mkdir -p ~/.claude/rules
-cp claude/file-links.md ~/.claude/rules/
-```
-
-To get plain cmd+click back instead of cmd+shift+click, `export
-CLAUDE_CODE_DISABLE_MOUSE=1`, at the cost of mouse scrolling in Claude Code
-(and the mod's plain click).
 
 ## Caveats
 

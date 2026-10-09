@@ -14,7 +14,9 @@ import { pathsOfToolUse, projectRoot, Roots } from './roots'
 async function openAtLine($: EngineInterface, href: string): Promise<void> {
   const target = fromHref(href)
   if (target === undefined) return
-  const { exitCode, stderr } = await $.process.run(['open', editorUrl(await schemeOf($), target)])
+  const url = editorUrl(await schemeOf($), target)
+  // macOS has `open`; elsewhere it cannot start and xdg-open takes the URL.
+  const { exitCode, stderr } = await $.process.run(['open', url]).catch(() => $.process.run(['xdg-open', url]))
   if (exitCode !== 0) $.ui.toast(`termlink: could not open ${target.path}: ${stderr.trim()}`)
 }
 
@@ -84,6 +86,14 @@ async function schemeOf($: EngineInterface): Promise<Scheme> {
   return (SCHEMES as readonly string[]).includes(wanted) ? (wanted as Scheme) : 'vscode'
 }
 
+// What the model is told, so it writes paths this mod can link.
+const RULE = `# File references
+
+File paths in your replies that exist on disk are turned into links that open in the person's editor, \
+\`path:42\` and \`path:42:7\` at that line. Write the path as it is on disk. A path relative to the working \
+directory is fine; for a file outside it, write the absolute path or \`~/...\`. Paths in fenced code blocks \
+and in commands in backticks are not linked.`
+
 export const register: Register = on => {
   const roots = new Roots()
 
@@ -135,6 +145,12 @@ export const register: Register = on => {
         </Box>
       </Box>
     )
+  })
+
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    if (!e.surfaces.includes('terminal')) return composed
+    return { sections: [...composed.sections, { id: 'termlink:file-links', text: RULE, scope: 'session' as const }] }
   })
 
   // A hook that throws is skipped, so a failed lookup never holds up the call.

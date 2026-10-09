@@ -1,5 +1,8 @@
 {
   "name": "termlink",
-  "version": "0.1.0",
-  "description": "Turns file paths in Claude's replies into links: cmd+shift+click opens the file, a plain click opens it at the line"
+  "version": "0.2.0",
+  "description": "Turns file paths in Claude's replies into links that open in your editor at the line",
+  "author": {
+    "name": "Justinas Kazanavicius"
+  }
 }
