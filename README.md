@@ -100,6 +100,32 @@ cp claude/file-links.md ~/.claude/rules/
 
 Rules load when a session starts.
 
+### The Claude Code mod
+
+`claude-mod/` is a Claude Code mod that does `termlink`'s job inside the TUI.
+It rewrites each reply as it is drawn: every path that exists on disk
+(`foo.py`, `foo.py:42`, `` `foo.py` `` (line 42)) becomes a
+`file:///abs/foo.py#L42` link. Code blocks, commands in backticks, URLs and
+existing links are left alone.
+
+- **cmd+shift+click** opens the file through Ghostty and the duti defaults,
+  at the top (a `file://` URL carries no line VS Code reads).
+- **Plain click** (fullscreen TUI) opens it at the line, via
+  `open $TERMLINK_SCHEME://file/abs/foo.py:42`. It lands after a short pause:
+  Claude Code waits to rule out a double-click first.
+
+Links inside a reply may only be `file:`, `http:` or `https:`, which is why
+cmd+shift+click can't carry the line and the plain click exists.
+
+With the mod, Claude can write `path:42` again, so the rule above is optional.
+Load it in every session by adding to `~/.claude/settings.json`:
+
+```json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/termlink/claude-mod" } }
+```
+
+Run its tests with `claude plugin test claude-mod`.
+
 ## Caveats
 
 - `termlink` is for your normal shell. It can't rewrite a TUI's output.

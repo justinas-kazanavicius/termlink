@@ -1,0 +1,125 @@
+import { describe, expect, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
+
+import { fromHref, linkify, resolvePath, toHref } from '../hooks/linkify'
+
+const CWD = '/repo'
+const HOME = '/home/me'
+const FILES = new Set([
+  '/repo/libs/a.py',
+  '/repo/README.md',
+  '/repo/.gitignore',
+  '/home/me/notes.md',
+  '/home/me/.claude/rules/x.md',
+  '/repo/my dir/x.ts',
+])
+const isFile = async (path: string) => FILES.has(path)
+const run = (text: string) => linkify(text, CWD, HOME, isFile)
+
+describe('linkify', () => {
+  test('links an existing bare path with its line', async () => {
+    const { text, hrefs } = await run('see libs/a.py:42 for it')
+    expect(text).toBe('see [libs/a.py:42](file:///repo/libs/a.py#L42) for it')
+    expect(hrefs).toEqual(['file:///repo/libs/a.py#L42'])
+  })
+
+  test('keeps a code span inside the link and reads a (line N) note', async () => {
+    const { text } = await run('open `libs/a.py` (line 7), and `./README.md`.')
+    expect(text).toBe(
+      'open [`libs/a.py`](file:///repo/libs/a.py#L7) (line 7), and [`./README.md`](file:///repo/README.md).',
+    )
+  })
+
+  test('takes line and column', async () => {
+    const { text } = await run('libs/a.py:3:9')
+    expect(text).toBe('[libs/a.py:3:9](file:///repo/libs/a.py#L3C9)')
+  })
+
+  test('resolves home paths', async () => {
+    const { hrefs } = await run('in ~/notes.md')
+    expect(hrefs).toEqual(['file:///home/me/notes.md'])
+  })
+
+  test('links hidden files and folders', async () => {
+    const { hrefs } = await run('see ~/.claude/rules/x.md:3 and .gitignore')
+    expect(hrefs).toEqual(['file:///home/me/.claude/rules/x.md#L3', 'file:///repo/.gitignore'])
+  })
+
+  test('leaves missing files, plain words, links, URLs and commands alone', async () => {
+    const input = [
+      'missing libs/b.py and e.g. Node.js',
+      '[libs/a.py](https://example.com/libs/a.py)',
+      'https://github.com/x/libs/a.py',
+      'run `uv run pytest libs/a.py` now',
+    ].join('\n')
+    const { text, hrefs } = await run(input)
+    expect(text).toBe(input)
+    expect(hrefs).toEqual([])
+  })
+
+  test('leaves fenced code blocks alone', async () => {
+    const input = 'before libs/a.py\n```\nlibs/a.py:1\n```\nafter'
+    const { text } = await run(input)
+    expect(text).toBe('before [libs/a.py](file:///repo/libs/a.py)\n```\nlibs/a.py:1\n```\nafter')
+  })
+
+  test('drops trailing punctuation from the path', async () => {
+    const { text } = await run('It is in README.md.')
+    expect(text).toBe('It is in [README.md](file:///repo/README.md).')
+  })
+
+  test('lists each href once', async () => {
+    const { hrefs } = await run('README.md and README.md')
+    expect(hrefs).toEqual(['file:///repo/README.md'])
+  })
+
+  test('href round-trips through spaces and parentheses', async () => {
+    const target = { path: '/repo/my dir/(x).ts', line: 4, column: 2 }
+    expect(toHref(target)).toBe('file:///repo/my%20dir/%28x%29.ts#L4C2')
+    expect(fromHref(toHref(target))).toEqual(target)
+    expect(fromHref('https://example.com')).toBe(undefined)
+  })
+
+  test('folds dot segments', async () => {
+    expect(resolvePath('../x/./y.py', '/a/b', HOME)).toBe('/a/x/y.py')
+  })
+})
+
+const stubHost = (on: On, opened: string[][]) => {
+  on('session.cwd', () => ({ value: CWD }))
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : e.name === 'TERMLINK_SCHEME' ? 'vscode' : undefined }))
+  on('fs.stat', ($, e) => {
+    if (!FILES.has(e.path)) return { deny: 'ENOENT' }
+    return { value: { kind: 'file', size: 1, mtimeMs: 0, isLink: false } }
+  })
+  on('process.run', ($, e) => {
+    opened.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+}
+
+const PROPS = { text: 'look at libs/a.py:42', isFirstOfReply: true }
+
+test('a plain click on a terminal link opens the editor at the line', async ($, on) => {
+  const opened: string[][] = []
+  stubHost(on, opened)
+  const ui = await $.ui.mount({ plugin: 'termlink', surface: 'terminal', component: 'AssistantMessage', props: PROPS })
+  const markdown = await ui.find({ type: 'Markdown' })
+  expect(markdown?.props.text).toBe('look at [libs/a.py:42](file:///repo/libs/a.py#L42)')
+  await ui.press({ key: markdown!.key!, link: { href: 'file:///repo/libs/a.py#L42' } })
+  expect(opened).toEqual([['open', 'vscode://file/repo/libs/a.py:42']])
+  await ui.unmount()
+})
+
+test('a reply with no paths is left to the engine', async ($, on) => {
+  stubHost(on, [])
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine'] }))
+  const ui = await $.ui.mount({
+    plugin: 'termlink',
+    surface: 'terminal',
+    component: 'AssistantMessage',
+    props: { text: 'nothing here', isFirstOfReply: true },
+  })
+  expect(await ui.find({ type: 'Markdown' })).toBe(undefined)
+  await ui.unmount()
+})
