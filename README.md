@@ -83,55 +83,72 @@ do nothing, which is exactly the gap `termlink` fills.
 
 ## Inside Claude Code
 
-Claude Code's fullscreen UI (`"tui": "fullscreen"`) turns on mouse
-reporting. While an app has the mouse, Ghostty only looks for links when
-shift is held, so use **cmd+shift+click** there. Plain cmd+click never
-reaches the link. To get plain cmd+click back, `export
-CLAUDE_CODE_DISABLE_MOUSE=1`, at the cost of mouse scrolling in Claude Code.
+`termlink` can't rewrite Claude Code's output, so `claude-mod/` does its job
+there: a Claude Code mod that turns every file path in Claude's replies into
+a link.
 
-Claude also has to print paths Ghostty can open. By default it writes
-`path:42`, which fails. `claude/file-links.md` is a rule that makes it write
-`dir/file.py` (line 42) instead. Install it with:
+### Install
+
+Clone this repo, then load the mod in every session by adding its folder to
+`~/.claude/settings.json` (merge into an existing `env` block):
+
+```json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/termlink/claude-mod" } }
+```
+
+Adjust the path to where you cloned it. New sessions load it; a running one
+reloads it whenever a file in the folder changes. `TERMLINK_SCHEME` from
+Step 3 picks the editor, as for `termlink`.
+
+### Clicking
+
+Claude Code's fullscreen UI (`"tui": "fullscreen"`) holds the mouse, so
+Ghostty only sees links with shift held.
+
+- **Plain click** opens the file at the line, via
+  `open $TERMLINK_SCHEME://file/abs/foo.py:42`. It lands after a short pause:
+  Claude Code waits to rule out a double-click first.
+- **cmd+shift+click** opens it through Ghostty and the duti defaults, at the
+  top. Links inside a reply may only be `file:`, `http:` or `https:`, and a
+  `file://` URL carries no line VS Code reads.
+
+### What gets linked
+
+Any path that exists on disk: `foo.py`, `foo.py:42`, `foo.py:42:7`,
+`` `foo.py` `` (line 42), `./x`, `../x`, `/abs/x`, `~/x`, hidden files and
+folders. Code blocks, commands in backticks, URLs and existing links are left
+alone.
+
+A relative path is tried against the working directory first, then against
+the projects Claude has read, edited, searched or `cd`ed into this session
+(the nearest folder holding `.git`), most recently used first. Run
+`/termlink-roots` to list them in the order they are tried.
+
+### Developing it
+
+`claude plugin test claude-mod` runs its tests and `claude plugin validate
+claude-mod` checks what it hooks. Run with `claude --debug` to see a hook that
+was skipped and why.
+
+### Without the mod
+
+`claude/file-links.md` is a rule that makes Claude write paths Ghostty can
+cmd+shift+click on its own: `dir/file.py` (line 42) rather than `path:42`,
+which Ghostty does not match. The mod makes it unnecessary.
 
 ```sh
 mkdir -p ~/.claude/rules
 cp claude/file-links.md ~/.claude/rules/
 ```
 
-Rules load when a session starts.
-
-### The Claude Code mod
-
-`claude-mod/` is a Claude Code mod that does `termlink`'s job inside the TUI.
-It rewrites each reply as it is drawn: every path that exists on disk
-(`foo.py`, `foo.py:42`, `` `foo.py` `` (line 42)) becomes a
-`file:///abs/foo.py#L42` link. Code blocks, commands in backticks, URLs and
-existing links are left alone. A relative path is tried against the
-working directory first, then against the projects Claude has read, edited,
-searched or `cd`ed into this session (the nearest folder holding `.git`),
-the most recently used first. `/termlink-roots` lists them in the order they are tried.
-
-- **cmd+shift+click** opens the file through Ghostty and the duti defaults,
-  at the top (a `file://` URL carries no line VS Code reads).
-- **Plain click** (fullscreen TUI) opens it at the line, via
-  `open $TERMLINK_SCHEME://file/abs/foo.py:42`. It lands after a short pause:
-  Claude Code waits to rule out a double-click first.
-
-Links inside a reply may only be `file:`, `http:` or `https:`, which is why
-cmd+shift+click can't carry the line and the plain click exists.
-
-With the mod, Claude can write `path:42` again, so the rule above is optional.
-Load it in every session by adding to `~/.claude/settings.json`:
-
-```json
-{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/termlink/claude-mod" } }
-```
-
-Run its tests with `claude plugin test claude-mod`.
+To get plain cmd+click back instead of cmd+shift+click, `export
+CLAUDE_CODE_DISABLE_MOUSE=1`, at the cost of mouse scrolling in Claude Code
+(and the mod's plain click).
 
 ## Caveats
 
-- `termlink` is for your normal shell. It can't rewrite a TUI's output.
+- `termlink` is for your normal shell. It can't rewrite a TUI's output;
+  for Claude Code, use the mod.
 - Some Ghostty builds have an OSC 8 dispatch bug
   ([ghostty#11907](https://github.com/ghostty-org/ghostty/issues/11907))
   where the link renders but the click does nothing; update Ghostty if
