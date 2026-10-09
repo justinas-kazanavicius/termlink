@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { fromHref, linkify, resolvePath, toHref } from '../hooks/linkify'
@@ -211,4 +211,63 @@ test('the system prompt gets the file-links section on the terminal only', async
   expect(terminal.sections.map(section => section.id)).toEqual(['intro', 'termlink:file-links'])
   const headless = await $.prompt.compose({ ...base, surfaces: [] })
   expect(headless.sections.map(section => section.id)).toEqual(['intro'])
+})
+
+const FULLSCREEN_COMMAND = {
+  command: 'termlink-fullscreen',
+  args: '',
+  origin: { kind: 'composer' },
+  presentation: { isFullscreen: false, columns: 80 },
+} as const
+
+const FULLSCREEN_ROW = {
+  key: 'tui',
+  label: 'Fullscreen',
+  kind: 'choice',
+  value: 'default',
+  options: ['default', 'fullscreen'],
+  provider: { plugin: 'engine', tier: 'core' },
+  isLocked: false,
+} as const
+
+test('the fullscreen hint shows once, after a turn that linked outside fullscreen', async ($, on) => {
+  const toasts: string[] = []
+  stubHost(on, [])
+  mock.store(on)
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('turn.complete', () => ({ text: '' }))
+  const ui = await $.ui.mount({
+    plugin: 'termlink',
+    surface: 'terminal',
+    component: 'AssistantMessage',
+    props: PROPS,
+    viewport: { columns: 100, rows: 40, isFullscreen: false },
+  })
+  const turn = { turnId: 't', reason: 'answer' } as unknown as Parameters<typeof $.turn.complete>[0]
+  await $.turn.complete(turn)
+  await $.turn.complete(turn)
+  expect(toasts.length).toBe(1)
+  expect(toasts[0]!.includes('/termlink-fullscreen')).toBe(true)
+  await ui.unmount()
+})
+
+test('/termlink-fullscreen turns the fullscreen row on', async ($, on) => {
+  const written: unknown[] = []
+  on('config.list', () => ({ value: [FULLSCREEN_ROW] }))
+  on('config.set', ($, e) => {
+    written.push([e.key, e.value])
+    return { value: e.value }
+  })
+  const { text } = await $.command.run(FULLSCREEN_COMMAND)
+  expect(written).toEqual([['tui', 'fullscreen']])
+  expect(text?.includes('Restart Claude Code')).toBe(true)
+})
+
+test('/termlink-fullscreen explains the setting when no row turns it on', async ($, on) => {
+  on('config.list', () => ({ value: [] }))
+  const { text } = await $.command.run(FULLSCREEN_COMMAND)
+  expect(text?.includes('"tui": "fullscreen"')).toBe(true)
 })

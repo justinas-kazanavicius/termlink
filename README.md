@@ -36,7 +36,10 @@ disk, absolute for files outside the working directory.
 
 - Claude Code with mod support (tested on 2.1.295; the mod API is early
   access and may change).
-- The fullscreen UI (`"tui": "fullscreen"` in settings) for plain click.
+- Fullscreen mode for the single click (`"tui": "fullscreen"` in
+  `~/.claude/settings.json`). Run `/termlink-fullscreen` to turn it on; the
+  mod also says so once, the first time it links a path outside fullscreen.
+  Without it, cmd+click still opens the file, without the line.
 - VS Code by default. Set `TERMLINK_SCHEME` to `cursor`, `vscode-insiders`
   or `file` (your default app, no line) before starting Claude Code.
 - macOS opens links with `open`, Linux with `xdg-open`.
@@ -47,7 +50,7 @@ disk, absolute for files outside the working directory.
 |---|---|
 | Links in Claude's replies, plain click at the line | Yes |
 | Instructions to Claude on writing paths | Yes |
-| `/termlink-roots` | Yes |
+| `/termlink-roots`, `/termlink-fullscreen` | Yes |
 | Editor choice (`TERMLINK_SCHEME`) | No; VS Code unless set |
 | Default apps for cmd+shift+click (Step 1 below) | No |
 | Links in your own shell's output (Steps 2 and 3) | No |

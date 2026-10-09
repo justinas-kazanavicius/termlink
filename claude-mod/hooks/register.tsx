@@ -94,8 +94,39 @@ File paths in your replies that exist on disk are turned into links that open in
 directory is fine; for a file outside it, write the absolute path or \`~/...\`. Paths in fenced code blocks \
 and in commands in backticks are not linked.`
 
+const FULLSCREEN_LINE = '"tui": "fullscreen"'
+const HINT =
+  `termlink: a single click opens files at the line only in fullscreen mode. Run /termlink-fullscreen, ` +
+  `or add ${FULLSCREEN_LINE} to ~/.claude/settings.json. cmd+click still opens them, without the line.`
+
+/**
+ * Turns on fullscreen mode through the settings menu, where a row for it exists.
+ *
+ * Args:
+ *   $: the engine interface.
+ *   isFullscreen: whether this session already runs fullscreen.
+ *
+ * Returns:
+ *   What happened, for the person to read.
+ */
+async function turnOnFullscreen($: EngineInterface, isFullscreen: boolean): Promise<string> {
+  if (isFullscreen) return 'Fullscreen mode is already on, so a single click opens files at the line.'
+  const manual = `Add ${FULLSCREEN_LINE} to ~/.claude/settings.json, then restart Claude Code.`
+  const row = (await $.config.list()).find(
+    candidate => /full.?screen/i.test(`${candidate.key} ${candidate.label}`) || candidate.key === 'tui',
+  )
+  if (row === undefined || row.isLocked) return `This Claude Code has no fullscreen switch a mod can turn on. ${manual}`
+  const value = row.kind === 'boolean' ? true : row.options?.find(option => /full.?screen/i.test(option))
+  if (value === undefined) return `Could not tell how to turn on "${row.label}". ${manual}`
+  const { deny } = await $.config.set({ key: row.key, value })
+  if (deny !== undefined) return `Claude Code refused to turn on "${row.label}": ${deny}. ${manual}`
+  return `Turned on "${row.label}". Restart Claude Code for it to take effect.`
+}
+
 export const register: Register = on => {
   const roots = new Roots()
+  // Set while drawing, read when the turn ends: a render hook cannot write the store.
+  let hasLinkedOutsideFullscreen = false
 
   // The history is read on each load, so a reload or a resumed session starts with its roots.
   // It runs past the hook, so a long session never holds up its start.
@@ -104,12 +135,28 @@ export const register: Register = on => {
       name: 'termlink-roots',
       description: 'List the folders termlink resolves relative paths against',
     })
+    await $.command.register({
+      name: 'termlink-fullscreen',
+      description: 'Turn on fullscreen mode, so a single click opens files at the line',
+    })
     void (async () => {
       for (const message of await $.session.messages()) {
         for (const use of message.toolUses) await noteRoots($, roots, use.tool, use.input)
       }
       $.ui.invalidate('ui.render')
     })()
+    return next(e)
+  })
+
+  on('command.run', { command: 'termlink-fullscreen' }, async ($, e) => ({
+    text: await turnOnFullscreen($, e.presentation?.isFullscreen === true),
+  }))
+
+  on('turn.complete', async ($, e, next) => {
+    if (hasLinkedOutsideFullscreen && (await $.store.get('fullscreenHintShown')) !== true) {
+      await $.store.set('fullscreenHintShown', true)
+      $.ui.toast(HINT)
+    }
     return next(e)
   })
 
@@ -125,6 +172,7 @@ export const register: Register = on => {
     const home = (await $.env.get('HOME')) ?? ''
     const { text, hrefs } = await linkify(e.props.text, roots.bases(cwd), home, path => isFile($, path))
     if (hrefs.length === 0) return next(e)
+    if (e.surface === 'terminal' && e.viewport?.isFullscreen === false) hasLinkedOutsideFullscreen = true
 
     // Elsewhere the engine's own row draws the links, opened as the surface opens links.
     if (e.surface !== 'terminal') return next({ ...e, props: { ...e.props, text } })
