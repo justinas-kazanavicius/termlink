@@ -43,14 +43,14 @@ export function looksLikePath(path: string): boolean {
  *
  * Args:
  *   path: relative, absolute or `~/` path.
- *   cwd: the session's working directory.
+ *   base: the folder a relative path is resolved against.
  *   home: the user's home directory.
  *
  * Returns:
  *   The absolute path with `.` and `..` segments folded.
  */
-export function resolvePath(path: string, cwd: string, home: string): string {
-  const joined = path.startsWith('/') ? path : path.startsWith('~/') ? `${home}/${path.slice(2)}` : `${cwd}/${path}`
+export function resolvePath(path: string, base: string, home: string): string {
+  const joined = path.startsWith('/') ? path : path.startsWith('~/') ? `${home}/${path.slice(2)}` : `${base}/${path}`
   const parts: string[] = []
   for (const part of joined.split('/')) {
     if (part === '' || part === '.') continue
@@ -116,11 +116,12 @@ export function fromHref(href: string): Target | undefined {
  *
  * Fenced code blocks, existing links and URLs are left as written. A path in a
  * code span keeps its backticks inside the link. A `(line N)` note after a path
- * stays as text and gives the link its line.
+ * stays as text and gives the link its line. A relative path links to the
+ * first base it names a file under.
  *
  * Args:
  *   markdown: the reply's text.
- *   cwd: the session's working directory.
+ *   bases: the folders a relative path is tried against, in order.
  *   home: the user's home directory.
  *   isFile: whether an absolute path is a file.
  *
@@ -129,7 +130,7 @@ export function fromHref(href: string): Target | undefined {
  */
 export async function linkify(
   markdown: string,
-  cwd: string,
+  bases: readonly string[],
   home: string,
   isFile: (path: string) => Promise<boolean>,
 ): Promise<Linked> {
@@ -139,7 +140,7 @@ export async function linkify(
   let prose: string[] = []
 
   const flush = async () => {
-    if (prose.length > 0) out.push(await linkifyProse(prose.join('\n'), cwd, home, isFile, hrefs))
+    if (prose.length > 0) out.push(await linkifyProse(prose.join('\n'), bases, home, isFile, hrefs))
     prose = []
   }
 
@@ -161,9 +162,23 @@ export async function linkify(
   return { text: out.join('\n'), hrefs }
 }
 
+async function findFile(
+  path: string,
+  bases: readonly string[],
+  home: string,
+  isFile: (path: string) => Promise<boolean>,
+): Promise<string | undefined> {
+  const isAnchored = path.startsWith('/') || path.startsWith('~/')
+  for (const base of isAnchored ? bases.slice(0, 1) : bases) {
+    const absolute = resolvePath(path, base, home)
+    if (await isFile(absolute)) return absolute
+  }
+  return undefined
+}
+
 async function linkifyProse(
   text: string,
-  cwd: string,
+  bases: readonly string[],
   home: string,
   isFile: (path: string) => Promise<boolean>,
   hrefs: string[],
@@ -176,8 +191,8 @@ async function linkifyProse(
     const path = spanPath ?? barePath
     if (path === undefined || !looksLikePath(path)) continue
 
-    const absolute = resolvePath(path, cwd, home)
-    if (!(await isFile(absolute))) continue
+    const absolute = await findFile(path, bases, home, isFile)
+    if (absolute === undefined) continue
 
     const isSpan = spanPath !== undefined
     const line = (isSpan ? spanLine ?? spanNoteLine : bareLine ?? bareNoteLine) ?? undefined

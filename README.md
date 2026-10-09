@@ -106,7 +106,10 @@ Rules load when a session starts.
 It rewrites each reply as it is drawn: every path that exists on disk
 (`foo.py`, `foo.py:42`, `` `foo.py` `` (line 42)) becomes a
 `file:///abs/foo.py#L42` link. Code blocks, commands in backticks, URLs and
-existing links are left alone.
+existing links are left alone. A relative path is tried against the
+working directory first, then against the projects Claude has read, edited,
+searched or `cd`ed into this session (the nearest folder holding `.git`),
+the most recently used first.
 
 - **cmd+shift+click** opens the file through Ghostty and the duti defaults,
   at the top (a `file://` URL carries no line VS Code reads).

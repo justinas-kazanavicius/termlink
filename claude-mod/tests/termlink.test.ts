@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { fromHref, linkify, resolvePath, toHref } from '../hooks/linkify'
+import { pathsOfToolUse, projectRoot, Roots } from '../hooks/roots'
 
 const CWD = '/repo'
 const HOME = '/home/me'
@@ -12,9 +13,13 @@ const FILES = new Set([
   '/home/me/notes.md',
   '/home/me/.claude/rules/x.md',
   '/repo/my dir/x.ts',
+  '/other/claude-mod/tsconfig.json',
+  '/third/claude-mod/tsconfig.json',
+  '/home/me/other/README.md',
+  '/home/me/other/claude-mod/tsconfig.json',
 ])
 const isFile = async (path: string) => FILES.has(path)
-const run = (text: string) => linkify(text, CWD, HOME, isFile)
+const run = (text: string) => linkify(text, [CWD], HOME, isFile)
 
 describe('linkify', () => {
   test('links an existing bare path with its line', async () => {
@@ -80,15 +85,58 @@ describe('linkify', () => {
     expect(fromHref('https://example.com')).toBe(undefined)
   })
 
+  test('tries a relative path against each base in order', async () => {
+    const twoBases = await linkify('claude-mod/tsconfig.json', [CWD, '/third', '/other'], HOME, isFile)
+    expect(twoBases.hrefs).toEqual(['file:///third/claude-mod/tsconfig.json'])
+    const cwdFirst = await linkify('README.md', [CWD, '/other'], HOME, isFile)
+    expect(cwdFirst.hrefs).toEqual(['file:///repo/README.md'])
+  })
+
   test('folds dot segments', async () => {
     expect(resolvePath('../x/./y.py', '/a/b', HOME)).toBe('/a/x/y.py')
+  })
+})
+
+describe('roots', () => {
+  test('reads the paths a tool call names', async () => {
+    expect(pathsOfToolUse('Read', { file_path: '/a/b.py' }, HOME)).toEqual(['/a/b.py'])
+    expect(pathsOfToolUse('Grep', { pattern: 'x', path: '~/proj' }, HOME)).toEqual(['/home/me/proj'])
+    expect(pathsOfToolUse('Bash', { command: 'cd ~/proj && ls; cd "/s p" ; cd rel' }, HOME)).toEqual([
+      '/home/me/proj',
+      '/s p',
+    ])
+  })
+
+  test('finds the nearest git folder, else the folder itself', async () => {
+    const tree: Record<string, 'file' | 'dir'> = {
+      '/home/me/proj/.git': 'dir',
+      '/home/me/proj/src/a.py': 'file',
+      '/home/me/notes/n.md': 'file',
+      '/tmp/x.py': 'file',
+    }
+    const kindOf = async (path: string) => tree[path]
+    expect(await projectRoot('/home/me/proj/src/a.py', HOME, kindOf)).toBe('/home/me/proj')
+    expect(await projectRoot('/home/me/notes/n.md', HOME, kindOf)).toBe('/home/me/notes')
+    expect(await projectRoot('/tmp/x.py', HOME, kindOf)).toBe(undefined)
+    expect(await projectRoot('/home/me/gone.py', HOME, kindOf)).toBe(undefined)
+  })
+
+  test('puts the most recently used root first, after the working directory', async () => {
+    const roots = new Roots()
+    roots.use('/a')
+    roots.use('/b')
+    roots.use('/a')
+    roots.use('/repo')
+    expect(roots.bases('/repo')).toEqual(['/repo', '/a', '/b'])
   })
 })
 
 const stubHost = (on: On, opened: string[][]) => {
   on('session.cwd', () => ({ value: CWD }))
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? HOME : e.name === 'TERMLINK_SCHEME' ? 'vscode' : undefined }))
+  on('session.messages', () => ({ value: [] }))
   on('fs.stat', ($, e) => {
+    if (e.path === '/home/me/other/.git') return { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } }
     if (!FILES.has(e.path)) return { deny: 'ENOENT' }
     return { value: { kind: 'file', size: 1, mtimeMs: 0, isLink: false } }
   })
@@ -121,5 +169,20 @@ test('a reply with no paths is left to the engine', async ($, on) => {
     props: { text: 'nothing here', isFirstOfReply: true },
   })
   expect(await ui.find({ type: 'Markdown' })).toBe(undefined)
+  await ui.unmount()
+})
+
+test('a relative path resolves in a project a tool call worked in', async ($, on) => {
+  stubHost(on, [])
+  on('tool.call', () => ({ result: { content: 'ok' } }))
+  await $.tool.call({ tool: 'Read', file_path: '/home/me/other/README.md' })
+  const ui = await $.ui.mount({
+    plugin: 'termlink',
+    surface: 'terminal',
+    component: 'AssistantMessage',
+    props: { text: 'see claude-mod/tsconfig.json', isFirstOfReply: true },
+  })
+  const markdown = await ui.find({ type: 'Markdown' })
+  expect(markdown?.props.text).toBe('see [claude-mod/tsconfig.json](file:///home/me/other/claude-mod/tsconfig.json)')
   await ui.unmount()
 })

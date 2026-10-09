@@ -1,6 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { encodePath, fromHref, linkify } from './linkify'
+import { pathsOfToolUse, projectRoot, Roots } from './roots'
 
 const SCHEMES = ['vscode', 'vscode-insiders', 'cursor', 'file'] as const
 type Scheme = (typeof SCHEMES)[number]
@@ -23,7 +24,29 @@ async function openAtLine($: EngineInterface, href: string): Promise<void> {
   if (exitCode !== 0) $.ui.toast(`termlink: could not open ${target.path}: ${stderr.trim()}`)
 }
 
+/**
+ * Notes the projects a tool call works in as the most recently used roots.
+ *
+ * Args:
+ *   $: the engine interface.
+ *   roots: the roots to update.
+ *   tool: the tool's name.
+ *   input: the arguments the model gave it.
+ */
+async function noteRoots($: EngineInterface, roots: Roots, tool: string, input: Record<string, unknown>): Promise<void> {
+  const home = (await $.env.get('HOME')) ?? ''
+  const kindOf = async (path: string) => (await $.fs.stat(path).catch(() => undefined))?.kind
+  for (const path of pathsOfToolUse(tool, input, home)) {
+    const root = await projectRoot(path, home, kindOf)
+    if (root !== undefined) roots.use(root)
+  }
+}
+
 export const register: Register = on => {
+  const roots = new Roots()
+  // The history is read once per load, so a reload or a resumed session starts with its roots.
+  let hasReadHistory = false
+
   // A hit is kept; a miss is asked again after a while, since a turn may create the file.
   const files = new Set<string>()
   const misses = new Map<string, number>()
@@ -45,9 +68,15 @@ export const register: Register = on => {
       misses.delete(path)
       return true
     }
+    if (!hasReadHistory) {
+      hasReadHistory = true
+      for (const message of await $.session.messages()) {
+        for (const use of message.toolUses) await noteRoots($, roots, use.tool, use.input)
+      }
+    }
     const cwd = await $.session.cwd()
     const home = (await $.env.get('HOME')) ?? ''
-    const { text, hrefs } = await linkify(e.props.text, cwd, home, isFile)
+    const { text, hrefs } = await linkify(e.props.text, roots.bases(cwd), home, isFile)
     if (hrefs.length === 0) return next(e)
 
     // Elsewhere the engine's own row draws the links, opened as the surface opens links.
@@ -69,5 +98,11 @@ export const register: Register = on => {
         </Box>
       </Box>
     )
+  })
+
+  // A hook that throws is skipped, so a failed lookup never holds up the call.
+  on('tool.call', async ($, e, next) => {
+    await noteRoots($, roots, e.tool, e as unknown as Record<string, unknown>)
+    return next(e)
   })
 }
